@@ -1,47 +1,49 @@
 const fs = require("fs");
 const path = require("path");
-const { Readable, Writable, Transform, pipeline } = require("stream");
-const { promisify } = require("util");
+const { Stream, Readable, Writable } = require("stream");
 
-// Define the source and destination directories for the backup
-const sourceDir = "text.txt";
-const destDir = "/path/to/destination";
-
-// Promisify pipeline to handle async copying
-const pipelineAsync = promisify(pipeline);
-
-// Recursive function to copy files and directories
-async function copyRecursive(source, destination) {
-  try {
-    // Ensure the destination directory exists; create it if not
-    if (!fs.existsSync(destination)) {
-      fs.mkdirSync(destination, { recursive: true });
-    }
-
-    const items = await fs.promises.readdir(source);
-
-    for (const item of items) {
-      const sourceItemPath = path.join(source, item);
-      const destItemPath = path.join(destination, item);
-      const stat = await fs.promises.stat(sourceItemPath);
-
-      if (stat.isDirectory()) {
-        await copyRecursive(sourceItemPath, destItemPath); // Recursively copy directories
-      } else {
-        // Create readable and writable streams
-        const sourceStream = fs.createReadStream(sourceItemPath);
-        const destStream = fs.createWriteStream(destItemPath);
-
-        // Use pipeline to efficiently copy data
-        await pipelineAsync(sourceStream, destStream);
-      }
-    }
-
-    console.log(`Copied ${source} to ${destination}`);
-  } catch (err) {
-    console.error(`Error copying ${source} to ${destination}: ${err.message}`);
+function copyFile(source, destination, callback) {
+  // Check if the source file exist
+  if (!fs.existsSync(source)) {
+    callback(new Error("NO such file or directory!!"));
+    return;
   }
+
+  let finalDestination = path.join(destination);
+
+  // I split the destination and check if the length is greater than 1 for instance a file named 'data/data.json' will return an array of ['data', 'data.json],
+  // if the array is length is more than 1 then, I know that is a directory and the last element in the array is the filename
+  // I first pop out the last element which is the file name and store it in a variable
+  // I use 'fs.mkdirSync()' to create the directory recursive with the recursive option
+  // Then i use 'path.join()' to join the created directory and the filename then i store it to the finalDestination variable
+  if (finalDestination.split("/").length > 1) {
+    const directories = finalDestination.split("/");
+
+    // I pop out the last element which is the file name and store it in the fileName variable so the remaining element will be the directory (since pop() modifies the array)
+    const fileName = directories.pop();
+
+    const newDirectory = path.join(...directories);
+
+    fs.mkdirSync(newDirectory, { recursive: true });
+
+    finalDestination = path.join(newDirectory, fileName);
+  }
+
+  const writableStream = fs.createWriteStream(path.join(finalDestination));
+
+  const readableStream = fs.createReadStream(source).pipe(writableStream);
+
+  readableStream.on("finish", () => console.log("File copied successfully"));
+
+  readableStream.on("error", error => {
+    callback(error);
+  });
 }
 
-// Start the backup process
-copyRecursive(sourceDir, destDir);
+copyFile("text.txt", "result/data.txt", err => {
+  console.log(err.message);
+}); // this will log 'File copied successfully'
+
+copyFile("result/data.txt", "folder/file.txt", err => {
+  console.log(err.message); // This will log 'NO such file or directory!!'  since there is no data/text.txt
+});
